@@ -9,7 +9,21 @@ typedef const native_handle_t *buffer_handle_t;
 
 #else
 
+/*
+ * Non-Android (Termux/bionic) build: the android_stub include path provides
+ * cutils/native_handle.h. Use it here as well so that buffer_handle_t matches
+ * the definition pulled in by <android/hardware_buffer.h> and
+ * <vndk/hardware_buffer.h>; otherwise the two typedefs clash.
+ */
+#if defined(__has_include)
+#if __has_include(<cutils/native_handle.h>)
+#include <cutils/native_handle.h>
+#define VK_ANDROID_NATIVE_BUFFER_HAVE_NATIVE_HANDLE 1
+#endif
+#endif
+#ifndef VK_ANDROID_NATIVE_BUFFER_HAVE_NATIVE_HANDLE
 typedef void *buffer_handle_t;
+#endif
 
 #endif
 
