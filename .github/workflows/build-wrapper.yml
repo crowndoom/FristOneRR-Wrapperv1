@@ -97,13 +97,17 @@ jobs:
                 -Dxmlconfig=disabled -Dvulkan-drivers=wrapper -Db_lundef=false
             ninja -C build src/vulkan/wrapper/libvulkan_wrapper.so
             cp build/src/vulkan/wrapper/libvulkan_wrapper.so build/libvulkan_wrapper.so.unstripped
-            STRIP="$(find /home/builder/lib -name llvm-strip -type f | head -n1)"
-            "$STRIP" --strip-unneeded -o build/libvulkan_wrapper.so build/libvulkan_wrapper.so.unstripped
+            cp build/src/vulkan/wrapper/libvulkan_wrapper.so build/libvulkan_wrapper.so
           '
 
-      - name: Fix ownership and list output
+      - name: Fix ownership
         run: |
           sudo chown -R "$(id -u):$(id -g)" build || true
+
+      - name: Strip the unstripped copy
+        run: |
+          STRIP="${{ steps.ndk.outputs.path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
+          "$STRIP" --strip-unneeded -o build/libvulkan_wrapper.so build/libvulkan_wrapper.so.unstripped
           ls -la build
 
       - name: Upload stripped + unstripped wrapper
