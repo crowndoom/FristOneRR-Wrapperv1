@@ -4,10 +4,6 @@ on:
   workflow_dispatch:
   push:
     branches: [ fristonerr-wrapper-v1 ]
-    paths:
-      - 'src/vulkan/wrapper/**'
-      - 'src/vulkan/wsi/**'
-      - '.github/workflows/build-wrapper.yml'
 
 jobs:
   build:
@@ -22,7 +18,6 @@ jobs:
           set -e
           NDK_ROOT=/usr/local/lib/android/sdk/ndk
           echo "Available NDKs:"; ls -1 "$NDK_ROOT" 2>/dev/null || true
-          # Prefer NDK 27 (leegao builds with r27c) for ABI compatibility with the compiler image.
           if [ -d "$NDK_ROOT" ] && ls -d "$NDK_ROOT"/27.* >/dev/null 2>&1; then
             NDK="$(ls -d "$NDK_ROOT"/27.* | head -n1)"
           else
@@ -31,27 +26,39 @@ jobs:
           echo "Using NDK: $NDK"
           echo "path=$NDK" >> "$GITHUB_OUTPUT"
 
+      - name: Cache leegao SPIRV-Tools build
+        uses: actions/cache@v4
+        with:
+          path: /tmp/SPIRV-Tools
+          key: leegao-spirvtools-v1
+
       - name: Build leegao SPIRV-Tools (aarch64 static libs)
         env:
           NDK: ${{ steps.ndk.outputs.path }}
         run: |
           set -e
-          git clone --depth 1 --recurse-submodules --shallow-submodules \
-            https://github.com/leegao/SPIRV-Tools.git /tmp/SPIRV-Tools
-          cd /tmp/SPIRV-Tools
-          # leegao pins -Werror; relax it so newer clang does not fail the build.
-          sed -i 's/ -Werror//g' Android.mk
-          mkdir -p build/libs build/app jni
-          printf 'LOCAL_PATH := $(call my-dir)\ninclude $(LOCAL_PATH)/../Android.mk\n' > jni/Android.mk
-          "$NDK/ndk-build" -j"$(nproc)" \
-            -C /tmp/SPIRV-Tools \
-            NDK_PROJECT_PATH=/tmp/SPIRV-Tools \
-            NDK_LIBS_OUT=/tmp/SPIRV-Tools/build/libs \
-            NDK_APP_OUT=/tmp/SPIRV-Tools/build/app \
-            APP_ABI=arm64-v8a \
-            APP_PLATFORM=android-30
+          LIBDIR=/tmp/SPIRV-Tools/build/app/local/arm64-v8a
+          if ls "$LIBDIR"/*.a >/dev/null 2>&1; then
+            echo "Using cached SPIRV-Tools build"
+          else
+            rm -rf /tmp/SPIRV-Tools
+            git clone --depth 1 --recurse-submodules --shallow-submodules \
+              https://github.com/leegao/SPIRV-Tools.git /tmp/SPIRV-Tools
+            cd /tmp/SPIRV-Tools
+            # leegao pins -Werror; relax it so newer clang does not fail the build.
+            sed -i 's/ -Werror//g' Android.mk
+            mkdir -p build/libs build/app jni
+            printf 'LOCAL_PATH := $(call my-dir)\ninclude $(LOCAL_PATH)/../Android.mk\n' > jni/Android.mk
+            "$NDK/ndk-build" -j"$(nproc)" \
+              -C /tmp/SPIRV-Tools \
+              NDK_PROJECT_PATH=/tmp/SPIRV-Tools \
+              NDK_LIBS_OUT=/tmp/SPIRV-Tools/build/libs \
+              NDK_APP_OUT=/tmp/SPIRV-Tools/build/app \
+              APP_ABI=arm64-v8a \
+              APP_PLATFORM=android-30
+          fi
           echo "--- produced static libraries ---"
-          find "$PWD" -name '*.a' -print
+          find /tmp/SPIRV-Tools/build -name '*.a' -print
 
       - name: Stage SPIRV-Tools into wrapper tree
         run: |
