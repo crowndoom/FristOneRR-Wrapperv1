@@ -264,8 +264,10 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
       WLOGD("bc4 support:");
       LOG_STRUCT(VkFormatProperties, &pdevice->bc4_format_properties);
 
-      pdevice->needs_bc1_emulation = !pdevice->base_supported_features.textureCompressionBC && !has_bc1_support(pdevice);
-      pdevice->needs_bc4_emulation = !pdevice->base_supported_features.textureCompressionBC && !has_bc4_support(pdevice);
+      /* Default BCn emulation OFF (mask 0x0000). Re-enable at runtime with
+       * FORCE_BCN_EMULATION=1. */
+      pdevice->needs_bc1_emulation = false;
+      pdevice->needs_bc4_emulation = false;
 
       if (CHECK_FLAG("FORCE_BCN_EMULATION")) {
          if (pdevice->base_supported_features.textureCompressionBC) {
