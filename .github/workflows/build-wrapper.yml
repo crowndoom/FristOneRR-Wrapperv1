@@ -1,0 +1,46 @@
+name: Build libvulkan_wrapper (aarch64 Android)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ fristonerr-wrapper-v1 ]
+    paths:
+      - 'src/vulkan/wrapper/**'
+      - 'src/vulkan/wsi/**'
+      - '.github/workflows/build-wrapper.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout wrapper source
+        uses: actions/checkout@v4
+
+      - name: Acquire wrapper-compiler image
+        run: |
+          set -e
+          if docker pull ghcr.io/leegao/mesa-wrapper-ci/wrapper-compiler:latest; then
+            echo "IMG=ghcr.io/leegao/mesa-wrapper-ci/wrapper-compiler:latest" >> "$GITHUB_ENV"
+          else
+            git clone --depth 1 https://github.com/FristOneRR-Admin/mesa-wrapper-CI.git _ci
+            docker build -t wrapper-compiler _ci
+            echo "IMG=wrapper-compiler" >> "$GITHUB_ENV"
+          fi
+
+      - name: Compile libvulkan_wrapper.so
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE:/workspace" "$IMG" build
+
+      - name: Fix ownership and list output
+        run: |
+          sudo chown -R "$(id -u):$(id -g)" build || true
+          ls -la build
+
+      - name: Upload stripped + unstripped wrapper
+        uses: actions/upload-artifact@v4
+        with:
+          name: libvulkan_wrapper-aarch64
+          path: |
+            build/libvulkan_wrapper.so
+            build/libvulkan_wrapper.so.unstripped
+          if-no-files-found: error
