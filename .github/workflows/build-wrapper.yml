@@ -41,10 +41,10 @@ jobs:
           cd /tmp/SPIRV-Tools
           # leegao pins -Werror; relax it so newer clang does not fail the build.
           sed -i 's/ -Werror//g' Android.mk
-          mkdir -p build/libs build/app
+          mkdir -p build/libs build/app build/jni
+          printf 'LOCAL_PATH := $(call my-dir)\ninclude $(LOCAL_PATH)/../Android.mk\n' > build/jni/Android.mk
           cd build
           "$NDK/ndk-build" -j"$(nproc)" \
-            -C .. \
             NDK_PROJECT_PATH=. \
             NDK_LIBS_OUT="$PWD/libs" \
             NDK_APP_OUT="$PWD/app" \
