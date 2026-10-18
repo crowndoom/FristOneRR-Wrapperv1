@@ -64,16 +64,13 @@
 
 #include <android/hardware_buffer.h>
 
-#ifndef WRAPPER_NATIVE_HANDLE_T_DEFINED
-#define WRAPPER_NATIVE_HANDLE_T_DEFINED
-typedef struct native_handle
-{
-    int version;        /* sizeof(native_handle) */
-    int numFds;         /* number of file-descriptors at &data[0] */
-    int numInts;        /* number of ints at &data[numFds] */
-    int data[];         /* numFds + numInts ints */
-} native_handle_t;
-#endif
+// typedef struct native_handle
+// {
+//     int version;        /* sizeof(native_handle) */
+//     int numFds;         /* number of file-descriptors at &data[0] */
+//     int numInts;        /* number of ints at &data[numFds] */
+//     int data[0];        /* numFds + numInts ints */
+// } native_handle_t;
 
 const native_handle_t* _Nullable AHardwareBuffer_getNativeHandle(
         const AHardwareBuffer* _Nonnull buffer);
