@@ -88,7 +88,18 @@ jobs:
 
       - name: Compile libvulkan_wrapper.so
         run: |
-          docker run --rm -v "$GITHUB_WORKSPACE:/workspace" "$IMG" build
+          docker run --rm -v "$GITHUB_WORKSPACE:/workspace" --entrypoint bash "$IMG" -c '
+            set -e
+            cd /workspace
+            meson setup build --cross-file /root/build-config/cross_file.txt \
+                -Dcpp_rtti=false -Dgbm=disabled -Dopengl=false -Dllvm=disabled \
+                -Dshared-llvm=disabled -Dplatforms=x11 -Dgallium-drivers= \
+                -Dxmlconfig=disabled -Dvulkan-drivers=wrapper -Db_lundef=false
+            ninja -C build src/vulkan/wrapper/libvulkan_wrapper.so
+            cp build/src/vulkan/wrapper/libvulkan_wrapper.so build/libvulkan_wrapper.so.unstripped
+            STRIP="$(find /home/builder/lib -name llvm-strip -type f | head -n1)"
+            "$STRIP" --strip-unneeded -o build/libvulkan_wrapper.so build/libvulkan_wrapper.so.unstripped
+          '
 
       - name: Fix ownership and list output
         run: |
