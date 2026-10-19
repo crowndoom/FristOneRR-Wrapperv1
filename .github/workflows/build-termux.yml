@@ -74,13 +74,14 @@ jobs:
             -v /tmp/ndk-r27c:/home/builder/lib/android-ndk-r27c \
             ghcr.io/termux/package-builder:latest \
             bash -c '
-              cd /home/builder/termux-packages
-              export TERMUX_TOPDIR=/home/builder/.termux-build
-              ./build-package.sh --library bionic vulkan-wrapper-android -s -f
-              echo "=== BUILD DONE ==="
-              find /home/builder/.termux-build -name "libvulkan_wrapper.so"
-              find /home/builder/.termux-build -name "libvulkan_wrapper.so" -exec cp {} /home/builder/termux-packages/libvulkan_wrapper.so \;
-              ls -la /home/builder/termux-packages/libvulkan_wrapper.so
+              echo "=== Checking available compilers ==="
+              ls /data/data/com.termux/files/usr/bin/clang* 2>/dev/null || echo "No termux clang"
+              which clang 2>/dev/null || echo "No clang in PATH"
+              ls /home/builder/lib/ 2>/dev/null || echo "No /home/builder/lib"
+              find / -name "clang" -type f 2>/dev/null | head -5
+              echo "=== Checking NDK ==="
+              ls /home/builder/lib/android-ndk-r27c/bin/clang 2>/dev/null && echo "NDK clang exists"
+              echo "=== Done ==="
             ' 2>&1 | tail -40
 
       - name: Extract built .so
