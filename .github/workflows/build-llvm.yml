@@ -57,34 +57,33 @@ jobs:
           CLANGPP=/usr/lib/llvm-21/bin/clang++
           TERMUX_DIR=/data/data/com.termux/files/usr
 
-          # Create cross file using printf to avoid quoting issues
-          {
-            echo "[binaries]"
-            echo "c = '$CLANG'"
-            echo "cpp = '$CLANGPP'"
-            echo "ar = '/usr/bin/llvm-ar'"
-            echo "strip = '/usr/bin/llvm-strip'"
-            echo "pkg-config = '/usr/bin/pkg-config'"
-            echo ""
-            echo "[constants]"
-            echo "termux_dir = '$TERMUX_DIR'"
-            echo ""
-            echo "[properties]"
-            echo "pkg_config_libdir = termux_dir + '/lib/pkgconfig:' + termux_dir + '/share/pkgconfig'"
-            echo "sys_root = termux_dir"
-            echo ""
-            echo "[built-in options]"
-            echo "c_args = ['-D__TERMUX__', '-D__USE_GNU', '-U__ANDROID__', '-I' + termux_dir + '/include', '-include', 'fcntl.h', '-include', 'unistd.h', '-target', 'aarch64-linux-android26']"
-            echo "cpp_args = ['-D__TERMUX__', '-D__USE_GNU', '-U__ANDROID__', '-I' + termux_dir + '/include', '-include', 'fcntl.h', '-include', 'unistd.h', '-target', 'aarch64-linux-android26']"
-            echo "c_link_args = ['-L' + termux_dir + '/lib', '-landroid-shmem', '-Wl,--allow-shlib-undefined']"
-            echo "cpp_link_args = ['-L' + termux_dir + '/lib', '-landroid-shmem', '-Wl,--allow-shlib-undefined', '-static-libstdc++']"
-            echo ""
-            echo "[host_machine]"
-            echo "system = 'android'"
-            echo "cpu_family = 'aarch64'"
-            echo "cpu = 'aarch64'"
-            echo "endian = 'little'"
-          } > /tmp/cross.txt
+          cat > /tmp/cross.txt <<EOF
+          [binaries]
+          c = '$CLANG'
+          cpp = '$CLANGPP'
+          ar = '/usr/bin/llvm-ar'
+          strip = '/usr/bin/llvm-strip'
+          pkg-config = '/usr/bin/pkg-config'
+
+          [constants]
+          termux_dir = '$TERMUX_DIR'
+
+          [properties]
+          pkg_config_libdir = termux_dir + '/lib/pkgconfig:' + termux_dir + '/share/pkgconfig'
+          sys_root = termux_dir
+
+          [built-in options]
+          c_args = ['-D__TERMUX__', '-D__USE_GNU', '-U__ANDROID__', '-I' + termux_dir + '/include', '-include', 'fcntl.h', '-include', 'unistd.h', '-target', 'aarch64-linux-android26']
+          cpp_args = ['-D__TERMUX__', '-D__USE_GNU', '-U__ANDROID__', '-I' + termux_dir + '/include', '-include', 'fcntl.h', '-include', 'unistd.h', '-target', 'aarch64-linux-android26']
+          c_link_args = ['-L' + termux_dir + '/lib', '-landroid-shmem', '-Wl,--allow-shlib-undefined']
+          cpp_link_args = ['-L' + termux_dir + '/lib', '-landroid-shmem', '-Wl,--allow-shlib-undefined', '-static-libstdc++']
+
+          [host_machine]
+          system = 'android'
+          cpu_family = 'aarch64'
+          cpu = 'aarch64'
+          endian = 'little'
+          EOF
 
           sed -i "s/#if defined(HAVE_MEMFD_CREATE) \&\& !defined __TERMUX__/#if defined(HAVE_MEMFD_CREATE)/" src/util/anon_file.c 2>/dev/null || true
           sed -i "s/dep_libudev = dependency(.libudev., required : false)/dep_libudev = null_dep/g" meson.build 2>/dev/null || true
@@ -97,36 +96,35 @@ jobs:
 
           ninja -C build src/vulkan/wrapper/libvulkan_wrapper.so
 
-          cp build/src/vulkan/wrapper/libvulkan_wrapper.so /output/libvulkan_wrapper.so.unstripped
-          /usr/bin/llvm-strip --strip-unneeded -o /output/libvulkan_wrapper.so /output/libvulkan_wrapper.so.unstripped
+          # Write output to /workspace (mounted from runner)
+          cp build/src/vulkan/wrapper/libvulkan_wrapper.so /workspace/libvulkan_wrapper.so.unstripped
+          /usr/bin/llvm-strip --strip-unneeded -o /workspace/libvulkan_wrapper.so /workspace/libvulkan_wrapper.so.unstripped
+          sync
           echo "BUILD SUCCESS"
-          ls -la /output/
+          ls -la /workspace/libvulkan_wrapper.so*
           SCRIPT
           chmod +x /tmp/build-wrapper.sh
-          echo "Script created"
 
       - name: Build wrapper with LLVM clang (in container)
         run: |
           set -e
-          mkdir -p build-output
           sudo docker run --rm \
             -v "$(pwd)/build-src:/workspace" \
-            -v /tmp/build-wrapper.sh:/build-wrapper.sh \
-            -v "$(pwd)/build-output:/output" \
+            -v /tmp/build-wrapper.sh:/build-wrapper.sh:ro \
             ghcr.io/termux/package-builder:latest \
             bash /build-wrapper.sh 2>&1 | tail -40
 
       - name: Verify and collect .so
         run: |
-          echo "=== Checking output dir ==="
-          ls -la build-output/
-          if [ -f build-output/libvulkan_wrapper.so ]; then
-            cp build-output/libvulkan_wrapper.so ./libvulkan_wrapper.so
-            cp build-output/libvulkan_wrapper.so.unstripped ./libvulkan_wrapper.so.unstripped 2>/dev/null || true
+          echo "=== Checking for built .so ==="
+          ls -la build-src/libvulkan_wrapper.so* 2>/dev/null || echo "Not in build-src"
+          find . -name "libvulkan_wrapper.so*" 2>/dev/null
+          if [ -f build-src/libvulkan_wrapper.so ]; then
+            cp build-src/libvulkan_wrapper.so ./libvulkan_wrapper.so
+            cp build-src/libvulkan_wrapper.so.unstripped ./libvulkan_wrapper.so.unstripped 2>/dev/null || true
             echo "Collected successfully"
           else
             echo "ERROR: .so not found"
-            find . -name "libvulkan_wrapper.so*" 2>/dev/null
             exit 1
           fi
 
