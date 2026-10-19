@@ -60,7 +60,10 @@ jobs:
             -v /tmp/termux-build:/home/builder/.termux-build \
             ghcr.io/termux/package-builder:latest \
             bash -c '
-              NDK=/home/builder/lib/android-ndk-r30
+              # Create symlink for NDK path expected by build system
+              if [ ! -d /home/builder/lib/android-ndk-r27c ]; then
+                ln -s /home/builder/lib/android-ndk-r30 /home/builder/lib/android-ndk-r27c
+              fi
               cd /home/builder/termux-packages
               export TERMUX_TOPDIR=/home/builder/.termux-build
               ./build-package.sh --library bionic vulkan-wrapper-android -s -f
