@@ -21,23 +21,6 @@ jobs:
           rm -rf tp/mesa_bionic
           cp -r frist-src tp/mesa_bionic
 
-      - name: Apply BCn-off patch to mesa_bionic
-        run: |
-          cd tp/mesa_bionic
-          python3 - <<'PY'
-          p='src/vulkan/wrapper/wrapper_physical_device.c'
-          s=open(p).read()
-          old='''      pdevice->needs_bc1_emulation = !pdevice->base_supported_features.textureCompressionBC && !has_bc1_support(pdevice);
-      pdevice->needs_bc4_emulation = !pdevice->base_supported_features.textureCompressionBC && !has_bc4_support(pdevice);'''
-          new='''      /* Default BCn emulation OFF (mask 0x0000). Re-enable with FORCE_BCN_EMULATION=1. */
-      pdevice->needs_bc1_emulation = false;
-      pdevice->needs_bc4_emulation = false;'''
-          assert old in s, "BCn lines not found"
-          s=s.replace(old,new)
-          open(p,'w').write(s)
-          print("patched")
-          PY
-
       - name: Build leegao SPIRV-Tools (aarch64 static libs)
         run: |
           set -e
