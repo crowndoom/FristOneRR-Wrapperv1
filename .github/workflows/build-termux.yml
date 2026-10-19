@@ -65,6 +65,9 @@ jobs:
         run: |
           set -e
           cd tp
+          # Make build dir writable
+          mkdir -p /tmp/termux-build
+          chmod 777 /tmp/termux-build
           sudo docker run --rm \
             -v "$(pwd):/home/builder/termux-packages" \
             -v /tmp/termux-build:/home/builder/.termux-build \
