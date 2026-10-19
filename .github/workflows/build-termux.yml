@@ -56,19 +56,28 @@ jobs:
         run: |
           set -e
           cd tp
-          # run-docker.sh needs the package builder image
           sudo ./scripts/run-docker.sh sudo bash -c '
             NDK=/home/builder/lib/android-ndk-r27c
             cd /home/builder/termux-packages
             export TERMUX_TOPDIR=/home/builder/.termux-build
             ./build-package.sh --library bionic vulkan-wrapper-android -s -f
+            # Copy the built .so to a known location
+            find /home/builder/.termux-build -name "libvulkan_wrapper.so" -exec cp {} /home/builder/termux-packages/libvulkan_wrapper.so \;
           ' 2>&1 | tail -40
 
       - name: Extract built .so
         run: |
           set -e
-          find / -name "libvulkan_wrapper.so" 2>/dev/null
-          cp $(find / -path "*vulkan-wrapper-android/build/src/vulkan/wrapper/libvulkan_wrapper.so" 2>/dev/null | head -1) ./libvulkan_wrapper.so
+          # The .so should be in tp/ if the container mounted it
+          find . -name "libvulkan_wrapper.so" 2>/dev/null
+          if [ -f tp/libvulkan_wrapper.so ]; then
+            cp tp/libvulkan_wrapper.so ./libvulkan_wrapper.so
+          elif [ -f libvulkan_wrapper.so ]; then
+            echo "already here"
+          else
+            echo "ERROR: .so not found"
+            exit 1
+          fi
           ls -la libvulkan_wrapper.so
 
       - name: Upload artifact
