@@ -96,37 +96,26 @@ jobs:
 
           ninja -C build src/vulkan/wrapper/libvulkan_wrapper.so
 
-          # Write output to /workspace (mounted from runner)
-          cp build/src/vulkan/wrapper/libvulkan_wrapper.so /workspace/libvulkan_wrapper.so.unstripped
-          /usr/bin/llvm-strip --strip-unneeded -o /workspace/libvulkan_wrapper.so /workspace/libvulkan_wrapper.so.unstripped
-          sync
+          cp build/src/vulkan/wrapper/libvulkan_wrapper.so /tmp/libvulkan_wrapper.so.unstripped
+          /usr/bin/llvm-strip --strip-unneeded -o /tmp/libvulkan_wrapper.so /tmp/libvulkan_wrapper.so.unstripped
           echo "BUILD SUCCESS"
-          ls -la /workspace/libvulkan_wrapper.so*
           SCRIPT
           chmod +x /tmp/build-wrapper.sh
 
-      - name: Build wrapper with LLVM clang (in container)
+      - name: Build wrapper with LLVM clang (in container, detached)
         run: |
           set -e
-          sudo docker run --rm \
-            -v "$(pwd)/build-src:/workspace" \
+          CONTAINER_ID=$(docker create -v "$(pwd)/build-src:/workspace" \
             -v /tmp/build-wrapper.sh:/build-wrapper.sh:ro \
             ghcr.io/termux/package-builder:latest \
-            bash /build-wrapper.sh 2>&1 | tail -40
-
-      - name: Verify and collect .so
-        run: |
-          echo "=== Checking for built .so ==="
-          ls -la build-src/libvulkan_wrapper.so* 2>/dev/null || echo "Not in build-src"
-          find . -name "libvulkan_wrapper.so*" 2>/dev/null
-          if [ -f build-src/libvulkan_wrapper.so ]; then
-            cp build-src/libvulkan_wrapper.so ./libvulkan_wrapper.so
-            cp build-src/libvulkan_wrapper.so.unstripped ./libvulkan_wrapper.so.unstripped 2>/dev/null || true
-            echo "Collected successfully"
-          else
-            echo "ERROR: .so not found"
-            exit 1
-          fi
+            bash /build-wrapper.sh)
+          echo "Container ID: $CONTAINER_ID"
+          docker start -a "$CONTAINER_ID" 2>&1 | tail -20
+          echo "Copying output..."
+          docker cp "$CONTAINER_ID:/tmp/libvulkan_wrapper.so" ./libvulkan_wrapper.so || echo "cp .so failed"
+          docker cp "$CONTAINER_ID:/tmp/libvulkan_wrapper.so.unstripped" ./libvulkan_wrapper.so.unstripped || echo "cp unstripped failed"
+          docker rm "$CONTAINER_ID" 2>/dev/null || true
+          ls -la libvulkan_wrapper.so*
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
