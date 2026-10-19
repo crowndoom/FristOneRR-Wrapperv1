@@ -1,0 +1,116 @@
+name: Build wrapper (NDK + static C++, aarch64 Android)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ fristonerr-wrapper-v1 ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Frist wrapper source (with BCn patch)
+        uses: actions/checkout@v4
+        with:
+          path: frist-src
+
+      - name: Build leegao SPIRV-Tools (aarch64 static libs)
+        run: |
+          set -e
+          NDK=/usr/local/lib/android/sdk/ndk/$(ls /usr/local/lib/android/sdk/ndk | grep '^27' | head -1)
+          git clone --depth 1 --recurse-submodules --shallow-submodules \
+            https://github.com/leegao/SPIRV-Tools.git /tmp/SPIRV-Tools
+          cd /tmp/SPIRV-Tools
+          sed -i 's/ -Werror//g' Android.mk
+          mkdir -p build/libs build/app jni
+          printf 'LOCAL_PATH := $(call my-dir)\ninclude $(LOCAL_PATH)/../Android.mk\n' > jni/Android.mk
+          "$NDK/ndk-build" -j"$(nproc)" -C /tmp/SPIRV-Tools \
+            NDK_PROJECT_PATH=/tmp/SPIRV-Tools \
+            NDK_LIBS_OUT=/tmp/SPIRV-Tools/build/libs \
+            NDK_APP_OUT=/tmp/SPIRV-Tools/build/app \
+            APP_ABI=arm64-v8a APP_PLATFORM=android-26
+          find /tmp/SPIRV-Tools/build -name '*.a'
+
+      - name: Stage SPIRV-Tools into source
+        run: |
+          set -e
+          rm -rf frist-src/src/vulkan/wrapper/include/spirv-tools
+          if ls /tmp/SPIRV-Tools/build/app/local/arm64-v8a/*.a >/dev/null 2>&1; then
+            cp /tmp/SPIRV-Tools/build/app/local/arm64-v8a/*.a frist-src/src/vulkan/wrapper/lib/ 2>/dev/null || true
+            mkdir -p frist-src/src/vulkan/wrapper/lib
+            cp /tmp/SPIRV-Tools/build/app/local/arm64-v8a/*.a frist-src/src/vulkan/wrapper/lib/
+          else
+            mkdir -p frist-src/src/vulkan/wrapper/lib
+            cp /tmp/SPIRV-Tools/build/libs/arm64-v8a/*.a frist-src/src/vulkan/wrapper/lib/
+          fi
+          cp -r /tmp/SPIRV-Tools/include frist-src/src/vulkan/wrapper/include/spirv-tools
+          ls -la frist-src/src/vulkan/wrapper/lib
+
+      - name: Create cross file
+        run: |
+          NDK=/usr/local/lib/android/sdk/ndk/$(ls /usr/local/lib/android/sdk/ndk | grep '^27' | head -1)
+          NDK_BIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          cat > /tmp/cross.txt <<EOF
+          [binaries]
+          c = '$NDK_BIN/aarch64-linux-android26-clang'
+          cpp = '$NDK_BIN/aarch64-linux-android26-clang++'
+          ar = '$NDK_BIN/llvm-ar'
+          strip = '$NDK_BIN/llvm-strip'
+          pkg-config = 'pkg-config'
+
+          [constants]
+          termux_dir = '/data/data/com.termux/files/usr'
+
+          [properties]
+          pkg_config_libdir = termux_dir + '/lib/pkgconfig:' + termux_dir + '/share/pkgconfig'
+
+          [built-in options]
+          c_args = ['-D__TERMUX__', '-D__USE_GNU', '-U__ANDROID__', '-I' + termux_dir + '/include', '-include', 'fcntl.h', '-include', 'unistd.h']
+          cpp_args = ['-D__TERMUX__', '-D__USE_GNU', '-U__ANDROID__', '-I' + termux_dir + '/include', '-include', 'fcntl.h', '-include', 'unistd.h']
+          c_link_args = ['-L' + termux_dir + '/lib', '-landroid-shmem', '-landroid', '-llog', '-Wl,--allow-shlib-undefined']
+          cpp_link_args = ['-L' + termux_dir + '/lib', '-landroid-shmem', '-landroid', '-llog', '-Wl,--allow-shlib-undefined', '-static-libstdc++']
+
+          [host_machine]
+          system = 'android'
+          cpu_family = 'aarch64'
+          cpu = 'aarch64'
+          endian = 'little'
+          EOF
+          echo "Cross file created"
+
+      - name: Patch source
+        run: |
+          cd frist-src
+          sed -i 's/#if defined(HAVE_MEMFD_CREATE) \&\& !defined __TERMUX__/#if defined(HAVE_MEMFD_CREATE)/' src/util/anon_file.c 2>/dev/null || true
+          sed -i "s/dep_libudev = dependency('libudev', required : false)/dep_libudev = null_dep/g" meson.build 2>/dev/null || true
+
+      - name: Configure and build
+        run: |
+          set -e
+          cd frist-src
+          NDK=/usr/local/lib/android/sdk/ndk/$(ls /usr/local/lib/android/sdk/ndk | grep '^27' | head -1)
+          meson setup build --cross-file /tmp/cross.txt \
+            -Dcpp_rtti=false -Dgbm=disabled -Dopengl=false -Dllvm=disabled \
+            -Dshared-llvm=disabled -Dplatforms=x11 -Dgallium-drivers= \
+            -Dxmlconfig=disabled -Dvulkan-drivers=wrapper -Db_lundef=false \
+            -Dbuildtype=release -Dplatform-sdk-version=26
+          ninja -C build src/vulkan/wrapper/libvulkan_wrapper.so
+
+      - name: Strip
+        run: |
+          set -e
+          cd frist-src
+          NDK=/usr/local/lib/android/sdk/ndk/$(ls /usr/local/lib/android/sdk/ndk | grep '^27' | head -1)
+          NDK_BIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          cp build/src/vulkan/wrapper/libvulkan_wrapper.so ../libvulkan_wrapper.so.unstripped
+          "$NDK_BIN/llvm-strip" --strip-unneeded -o ../libvulkan_wrapper.so ../libvulkan_wrapper.so.unstripped
+          ls -la ../libvulkan_wrapper.so
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libvulkan_wrapper-ndk26
+          path: |
+            libvulkan_wrapper.so
+            libvulkan_wrapper.so.unstripped
+          if-no-files-found: error
