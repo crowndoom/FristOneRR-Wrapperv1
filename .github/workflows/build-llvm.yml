@@ -109,13 +109,26 @@ jobs:
               cp build/src/vulkan/wrapper/libvulkan_wrapper.so /workspace/libvulkan_wrapper.so.unstripped
               /usr/bin/llvm-strip --strip-unneeded -o /workspace/libvulkan_wrapper.so /workspace/libvulkan_wrapper.so.unstripped
               echo "BUILD SUCCESS"
+              ls -la /workspace/libvulkan_wrapper.so* 2>/dev/null || echo "Files not in /workspace"
             ' 2>&1 | tail -40
+
+      - name: Verify and collect .so
+        run: |
+          echo "=== Checking for built .so ==="
+          ls -la tp/mesa_bionic/libvulkan_wrapper.so* 2>/dev/null || echo "Not in tp/mesa_bionic"
+          ls -la libvulkan_wrapper.so* 2>/dev/null || echo "Not in root"
+          find . -name "libvulkan_wrapper.so*" 2>/dev/null
+          # Copy to a reliable location
+          if [ -f tp/mesa_bionic/libvulkan_wrapper.so ]; then
+            cp tp/mesa_bionic/libvulkan_wrapper.so ./libvulkan_wrapper.so
+            cp tp/mesa_bionic/libvulkan_wrapper.so.unstripped ./libvulkan_wrapper.so.unstripped 2>/dev/null || true
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: libvulkan_wrapper-llvm
           path: |
-            tp/mesa_bionic/libvulkan_wrapper.so
-            tp/mesa_bionic/libvulkan_wrapper.so.unstripped
+            libvulkan_wrapper.so
+            libvulkan_wrapper.so.unstripped
           if-no-files-found: error
