@@ -14,12 +14,6 @@ jobs:
         with:
           path: frist-src
 
-      - name: Clone termux-packages (for source reference)
-        run: |
-          git clone --depth 1 https://github.com/leegao/vulkan_wrapper_termux-packages.git tp
-          rm -rf tp/mesa_bionic
-          cp -r frist-src tp/mesa_bionic
-
       - name: Build leegao SPIRV-Tools (aarch64 static libs)
         run: |
           set -e
@@ -37,137 +31,90 @@ jobs:
             APP_ABI=arm64-v8a APP_PLATFORM=android-26
           find /tmp/SPIRV-Tools/build -name '*.a'
 
-      - name: Stage SPIRV-Tools into mesa_bionic
+      - name: Prepare source with SPIRV-Tools
         run: |
           set -e
-          mkdir -p tp/mesa_bionic/src/vulkan/wrapper/lib
-          rm -f tp/mesa_bionic/src/vulkan/wrapper/lib/*.a
+          rm -rf build-src
+          cp -r frist-src build-src
+          mkdir -p build-src/src/vulkan/wrapper/lib
+          rm -f build-src/src/vulkan/wrapper/lib/*.a
           if ls /tmp/SPIRV-Tools/build/app/local/arm64-v8a/*.a >/dev/null 2>&1; then
-            cp /tmp/SPIRV-Tools/build/app/local/arm64-v8a/*.a tp/mesa_bionic/src/vulkan/wrapper/lib/
+            cp /tmp/SPIRV-Tools/build/app/local/arm64-v8a/*.a build-src/src/vulkan/wrapper/lib/
           else
-            cp /tmp/SPIRV-Tools/build/libs/arm64-v8a/*.a tp/mesa_bionic/src/vulkan/wrapper/lib/
+            cp /tmp/SPIRV-Tools/build/libs/arm64-v8a/*.a build-src/src/vulkan/wrapper/lib/
           fi
-          rm -rf tp/mesa_bionic/src/vulkan/wrapper/include/spirv-tools
-          cp -r /tmp/SPIRV-Tools/include tp/mesa_bionic/src/vulkan/wrapper/include/spirv-tools
-          ls -la tp/mesa_bionic/src/vulkan/wrapper/lib
+          rm -rf build-src/src/vulkan/wrapper/include/spirv-tools
+          cp -r /tmp/SPIRV-Tools/include build-src/src/vulkan/wrapper/include/spirv-tools
+          ls -la build-src/src/vulkan/wrapper/lib
 
-      - name: Build wrapper with LLVM clang (in container)
+      - name: Create build script
         run: |
+          cat > /tmp/build-wrapper.sh <<'SCRIPT'
+          #!/bin/bash
           set -e
-          cd tp/mesa_bionic
-          sudo docker run --rm \
-            -v "$(pwd):/workspace" \
-            ghcr.io/termux/package-builder:latest \
-            bash -c '
-              set -e
-              cd /workspace
-              # Use LLVM clang (Termux compiler) with Termux sysroot
-              CLANG=/usr/lib/llvm-21/bin/clang
-              CLANGPP=/usr/lib/llvm-21/bin/clang++
-              TERMUX_DIR=/data/data/com.termux/files/usr
-              
-              # Create cross file
-              cat > /tmp/cross.txt <<EOF
-              [binaries]
-              c = '"'$CLANG'"'
-              cpp = '"'$CLANGPP'"'
-              ar = '"'/usr/bin/llvm-ar'"'
-              strip = '"'/usr/bin/llvm-strip'"'
-              pkg-config = '"'/usr/bin/pkg-config'"'
+          cd /workspace
+          CLANG=/usr/lib/llvm-21/bin/clang
+          CLANGPP=/usr/lib/llvm-21/bin/clang++
+          TERMUX_DIR=/data/data/com.termux/files/usr
 
-              [constants]
-              termux_dir = '"'$TERMUX_DIR'"'
+          # Create cross file using printf to avoid quoting issues
+          {
+            echo "[binaries]"
+            echo "c = '$CLANG'"
+            echo "cpp = '$CLANGPP'"
+            echo "ar = '/usr/bin/llvm-ar'"
+            echo "strip = '/usr/bin/llvm-strip'"
+            echo "pkg-config = '/usr/bin/pkg-config'"
+            echo ""
+            echo "[constants]"
+            echo "termux_dir = '$TERMUX_DIR'"
+            echo ""
+            echo "[properties]"
+            echo "pkg_config_libdir = termux_dir + '/lib/pkgconfig:' + termux_dir + '/share/pkgconfig'"
+            echo "sys_root = termux_dir"
+            echo ""
+            echo "[built-in options]"
+            echo "c_args = ['-D__TERMUX__', '-D__USE_GNU', '-U__ANDROID__', '-I' + termux_dir + '/include', '-include', 'fcntl.h', '-include', 'unistd.h', '-target', 'aarch64-linux-android26']"
+            echo "cpp_args = ['-D__TERMUX__', '-D__USE_GNU', '-U__ANDROID__', '-I' + termux_dir + '/include', '-include', 'fcntl.h', '-include', 'unistd.h', '-target', 'aarch64-linux-android26']"
+            echo "c_link_args = ['-L' + termux_dir + '/lib', '-landroid-shmem', '-Wl,--allow-shlib-undefined']"
+            echo "cpp_link_args = ['-L' + termux_dir + '/lib', '-landroid-shmem', '-Wl,--allow-shlib-undefined', '-static-libstdc++']"
+            echo ""
+            echo "[host_machine]"
+            echo "system = 'android'"
+            echo "cpu_family = 'aarch64'"
+            echo "cpu = 'aarch64'"
+            echo "endian = 'little'"
+          } > /tmp/cross.txt
 
-              [properties]
-              pkg_config_libdir = termux_dir + '"'/lib/pkgconfig:'"' + termux_dir + '"'/share/pkgconfig'"'
+          sed -i "s/#if defined(HAVE_MEMFD_CREATE) \&\& !defined __TERMUX__/#if defined(HAVE_MEMFD_CREATE)/" src/util/anon_file.c 2>/dev/null || true
+          sed -i "s/dep_libudev = dependency(.libudev., required : false)/dep_libudev = null_dep/g" meson.build 2>/dev/null || true
 
-              [built-in options]
-              c_args = ['"'"'-D__TERMUX__'"'"', '"'"'-D__USE_GNU'"'"', '"'"'-U__ANDROID__'"'"', '"'"'-I'"'"' + termux_dir + '"'"'/include'"'"', '"'"'-include'"'"', '"'"'fcntl.h'"'"', '"'"'-include'"'"', '"'"'unistd.h'"'"', '"'"'-target'"'"', '"'"'aarch64-linux-android26'"'"']
-              cpp_args = ['"'"'-D__TERMUX__'"'"', '"'"'-D__USE_GNU'"'"', '"'"'-U__ANDROID__'"'"', '"'"'-I'"'"' + termux_dir + '"'"'/include'"'"', '"'"'-include'"'"', '"'"'fcntl.h'"'"', '"'"'-include'"'"', '"'"'unistd.h'"'"', '"'"'-target'"'"', '"'"'aarch64-linux-android26'"'"']
-              c_link_args = ['"'"'-L'"'"' + termux_dir + '"'"'/lib'"'"', '"'"'-landroid-shmem'"'"', '"'"'-Wl,--allow-shlib-undefined'"'"']
-              cpp_link_args = ['"'"'-L'"'"' + termux_dir + '"'"'/lib'"'"', '"'"'-landroid-shmem'"'"', '"'"'-Wl,--allow-shlib-undefined'"'"', '"'"'-static-libstdc++'"'"']
+          meson setup build --cross-file /tmp/cross.txt \
+            -Dcpp_rtti=false -Dgbm=disabled -Dopengl=false -Dllvm=disabled \
+            -Dshared-llvm=disabled -Dplatforms=x11 -Dgallium-drivers= \
+            -Dxmlconfig=disabled -Dvulkan-drivers=wrapper -Db_lundef=false \
+            -Dbuildtype=release
 
-              [host_machine]
-              system = '"'"'android'"'"'
-              cpu_family = '"'"'aarch64'"'"'
-              cpu = '"'"'aarch64'"'"'
-              endian = '"'"'little'"'"'
-              EOF
+          ninja -C build src/vulkan/wrapper/libvulkan_wrapper.so
 
-              # Patch anon_file.c for memfd_create
-              sed -i "s/#if defined(HAVE_MEMFD_CREATE) \&\& !defined __TERMUX__/#if defined(HAVE_MEMFD_CREATE)/" src/util/anon_file.c 2>/dev/null || true
-              sed -i "s/dep_libudev = dependency(.libudev., required : false)/dep_libudev = null_dep/g" meson.build 2>/dev/null || true
+          cp build/src/vulkan/wrapper/libvulkan_wrapper.so /output/libvulkan_wrapper.so.unstripped
+          /usr/bin/llvm-strip --strip-unneeded -o /output/libvulkan_wrapper.so /output/libvulkan_wrapper.so.unstripped
+          echo "BUILD SUCCESS"
+          ls -la /output/
+          SCRIPT
+          chmod +x /tmp/build-wrapper.sh
+          echo "Script created"
 
-              meson setup build --cross-file /tmp/cross.txt \
-                -Dcpp_rtti=false -Dgbm=disabled -Dopengl=false -Dllvm=disabled \
-                -Dshared-llvm=disabled -Dplatforms=x11 -Dgallium-drivers= \
-                -Dxmlconfig=disabled -Dvulkan-drivers=wrapper -Db_lundef=false \
-                -Dbuildtype=release
-
-              ninja -C build src/vulkan/wrapper/libvulkan_wrapper.so
-
-              cp build/src/vulkan/wrapper/libvulkan_wrapper.so /workspace/libvulkan_wrapper.so.unstripped
-              /usr/bin/llvm-strip --strip-unneeded -o /workspace/libvulkan_wrapper.so /workspace/libvulkan_wrapper.so.unstripped
       - name: Build wrapper with LLVM clang (in container)
         run: |
           set -e
           mkdir -p build-output
-          cd tp/mesa_bionic
           sudo docker run --rm \
-            -v "$(pwd):/workspace" \
-            -v "$(pwd)/../../../build-output:/output" \
+            -v "$(pwd)/build-src:/workspace" \
+            -v /tmp/build-wrapper.sh:/build-wrapper.sh \
+            -v "$(pwd)/build-output:/output" \
             ghcr.io/termux/package-builder:latest \
-            bash -c '
-              set -e
-              cd /workspace
-              CLANG=/usr/lib/llvm-21/bin/clang
-              CLANGPP=/usr/lib/llvm-21/bin/clang++
-              TERMUX_DIR=/data/data/com.termux/files/usr
-
-              cat > /tmp/cross.txt <<EOF
-              [binaries]
-              c = "'$CLANG'"
-              cpp = "'$CLANGPP'"
-              ar = "/usr/bin/llvm-ar"
-              strip = "/usr/bin/llvm-strip"
-              pkg-config = "/usr/bin/pkg-config"
-
-              [constants]
-              termux_dir = "'$TERMUX_DIR'"
-
-              [properties]
-              pkg_config_libdir = termux_dir + "/lib/pkgconfig:" + termux_dir + "/share/pkgconfig"
-              sys_root = termux_dir
-
-              [built-in options]
-              c_args = ["-D__TERMUX__", "-D__USE_GNU", "-U__ANDROID__", "-I" + termux_dir + "/include", "-include", "fcntl.h", "-include", "unistd.h", "-target", "aarch64-linux-android26"]
-              cpp_args = ["-D__TERMUX__", "-D__USE_GNU", "-U__ANDROID__", "-I" + termux_dir + "/include", "-include", "fcntl.h", "-include", "unistd.h", "-target", "aarch64-linux-android26"]
-              c_link_args = ["-L" + termux_dir + "/lib", "-landroid-shmem", "-Wl,--allow-shlib-undefined"]
-              cpp_link_args = ["-L" + termux_dir + "/lib", "-landroid-shmem", "-Wl,--allow-shlib-undefined", "-static-libstdc++"]
-
-              [host_machine]
-              system = "android"
-              cpu_family = "aarch64"
-              cpu = "aarch64"
-              endian = "little"
-              EOF
-
-              sed -i "s/#if defined(HAVE_MEMFD_CREATE) \&\& !defined __TERMUX__/#if defined(HAVE_MEMFD_CREATE)/" src/util/anon_file.c 2>/dev/null || true
-              sed -i "s/dep_libudev = dependency(.libudev., required : false)/dep_libudev = null_dep/g" meson.build 2>/dev/null || true
-
-              meson setup build --cross-file /tmp/cross.txt \
-                -Dcpp_rtti=false -Dgbm=disabled -Dopengl=false -Dllvm=disabled \
-                -Dshared-llvm=disabled -Dplatforms=x11 -Dgallium-drivers= \
-                -Dxmlconfig=disabled -Dvulkan-drivers=wrapper -Db_lundef=false \
-                -Dbuildtype=release
-
-              ninja -C build src/vulkan/wrapper/libvulkan_wrapper.so
-
-              cp build/src/vulkan/wrapper/libvulkan_wrapper.so /output/libvulkan_wrapper.so.unstripped
-              /usr/bin/llvm-strip --strip-unneeded -o /output/libvulkan_wrapper.so /output/libvulkan_wrapper.so.unstripped
-              echo "BUILD SUCCESS"
-              ls -la /output/
-            ' 2>&1 | tail -40
+            bash /build-wrapper.sh 2>&1 | tail -40
 
       - name: Verify and collect .so
         run: |
