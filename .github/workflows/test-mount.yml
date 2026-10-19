@@ -1,0 +1,17 @@
+name: Test Docker volume mount
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Test volume mount
+        run: |
+          mkdir -p test-output
+          echo "Before: $(ls test-output/)"
+          docker run --rm -v "$(pwd)/test-output:/output" ghcr.io/termux/package-builder:latest \
+            bash -c 'echo "hello" > /output/test.txt; ls -la /output/'
+          echo "After: $(ls test-output/)"
+          cat test-output/test.txt 2>/dev/null || echo "File not found on runner"
