@@ -1,0 +1,121 @@
+name: Build wrapper (LLVM clang, aarch64 Android)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ fristonerr-wrapper-v1 ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Frist wrapper source (with BCn patch)
+        uses: actions/checkout@v4
+        with:
+          path: frist-src
+
+      - name: Clone termux-packages (for source reference)
+        run: |
+          git clone --depth 1 https://github.com/leegao/vulkan_wrapper_termux-packages.git tp
+          rm -rf tp/mesa_bionic
+          cp -r frist-src tp/mesa_bionic
+
+      - name: Build leegao SPIRV-Tools (aarch64 static libs)
+        run: |
+          set -e
+          git clone --depth 1 --recurse-submodules --shallow-submodules \
+            https://github.com/leegao/SPIRV-Tools.git /tmp/SPIRV-Tools
+          cd /tmp/SPIRV-Tools
+          sed -i 's/ -Werror//g' Android.mk
+          mkdir -p build/libs build/app jni
+          printf 'LOCAL_PATH := $(call my-dir)\ninclude $(LOCAL_PATH)/../Android.mk\n' > jni/Android.mk
+          NDK=/usr/local/lib/android/sdk/ndk/$(ls /usr/local/lib/android/sdk/ndk | grep '^27' | head -1)
+          "$NDK/ndk-build" -j"$(nproc)" -C /tmp/SPIRV-Tools \
+            NDK_PROJECT_PATH=/tmp/SPIRV-Tools \
+            NDK_LIBS_OUT=/tmp/SPIRV-Tools/build/libs \
+            NDK_APP_OUT=/tmp/SPIRV-Tools/build/app \
+            APP_ABI=arm64-v8a APP_PLATFORM=android-26
+          find /tmp/SPIRV-Tools/build -name '*.a'
+
+      - name: Stage SPIRV-Tools into mesa_bionic
+        run: |
+          set -e
+          mkdir -p tp/mesa_bionic/src/vulkan/wrapper/lib
+          rm -f tp/mesa_bionic/src/vulkan/wrapper/lib/*.a
+          if ls /tmp/SPIRV-Tools/build/app/local/arm64-v8a/*.a >/dev/null 2>&1; then
+            cp /tmp/SPIRV-Tools/build/app/local/arm64-v8a/*.a tp/mesa_bionic/src/vulkan/wrapper/lib/
+          else
+            cp /tmp/SPIRV-Tools/build/libs/arm64-v8a/*.a tp/mesa_bionic/src/vulkan/wrapper/lib/
+          fi
+          rm -rf tp/mesa_bionic/src/vulkan/wrapper/include/spirv-tools
+          cp -r /tmp/SPIRV-Tools/include tp/mesa_bionic/src/vulkan/wrapper/include/spirv-tools
+          ls -la tp/mesa_bionic/src/vulkan/wrapper/lib
+
+      - name: Build wrapper with LLVM clang (in container)
+        run: |
+          set -e
+          cd tp/mesa_bionic
+          sudo docker run --rm \
+            -v "$(pwd):/workspace" \
+            ghcr.io/termux/package-builder:latest \
+            bash -c '
+              set -e
+              cd /workspace
+              # Use LLVM clang (Termux compiler) with Termux sysroot
+              CLANG=/usr/lib/llvm-21/bin/clang
+              CLANGPP=/usr/lib/llvm-21/bin/clang++
+              TERMUX_DIR=/data/data/com.termux/files/usr
+              
+              # Create cross file
+              cat > /tmp/cross.txt <<EOF
+              [binaries]
+              c = '"'$CLANG'"'
+              cpp = '"'$CLANGPP'"'
+              ar = '"'/usr/bin/llvm-ar'"'
+              strip = '"'/usr/bin/llvm-strip'"'
+              pkg-config = '"'/usr/bin/pkg-config'"'
+
+              [constants]
+              termux_dir = '"'$TERMUX_DIR'"'
+
+              [properties]
+              pkg_config_libdir = termux_dir + '"'/lib/pkgconfig:'"' + termux_dir + '"'/share/pkgconfig'"'
+
+              [built-in options]
+              c_args = ['"'"'-D__TERMUX__'"'"', '"'"'-D__USE_GNU'"'"', '"'"'-U__ANDROID__'"'"', '"'"'-I'"'"' + termux_dir + '"'"'/include'"'"', '"'"'-include'"'"', '"'"'fcntl.h'"'"', '"'"'-include'"'"', '"'"'unistd.h'"'"', '"'"'-target'"'"', '"'"'aarch64-linux-android26'"'"']
+              cpp_args = ['"'"'-D__TERMUX__'"'"', '"'"'-D__USE_GNU'"'"', '"'"'-U__ANDROID__'"'"', '"'"'-I'"'"' + termux_dir + '"'"'/include'"'"', '"'"'-include'"'"', '"'"'fcntl.h'"'"', '"'"'-include'"'"', '"'"'unistd.h'"'"', '"'"'-target'"'"', '"'"'aarch64-linux-android26'"'"']
+              c_link_args = ['"'"'-L'"'"' + termux_dir + '"'"'/lib'"'"', '"'"'-landroid-shmem'"'"', '"'"'-Wl,--allow-shlib-undefined'"'"']
+              cpp_link_args = ['"'"'-L'"'"' + termux_dir + '"'"'/lib'"'"', '"'"'-landroid-shmem'"'"', '"'"'-Wl,--allow-shlib-undefined'"'"', '"'"'-static-libstdc++'"'"']
+
+              [host_machine]
+              system = '"'"'android'"'"'
+              cpu_family = '"'"'aarch64'"'"'
+              cpu = '"'"'aarch64'"'"'
+              endian = '"'"'little'"'"'
+              EOF
+
+              # Patch anon_file.c for memfd_create
+              sed -i "s/#if defined(HAVE_MEMFD_CREATE) \&\& !defined __TERMUX__/#if defined(HAVE_MEMFD_CREATE)/" src/util/anon_file.c 2>/dev/null || true
+              sed -i "s/dep_libudev = dependency(.libudev., required : false)/dep_libudev = null_dep/g" meson.build 2>/dev/null || true
+
+              meson setup build --cross-file /tmp/cross.txt \
+                -Dcpp_rtti=false -Dgbm=disabled -Dopengl=false -Dllvm=disabled \
+                -Dshared-llvm=disabled -Dplatforms=x11 -Dgallium-drivers= \
+                -Dxmlconfig=disabled -Dvulkan-drivers=wrapper -Db_lundef=false \
+                -Dbuildtype=release
+
+              ninja -C build src/vulkan/wrapper/libvulkan_wrapper.so
+
+              cp build/src/vulkan/wrapper/libvulkan_wrapper.so /workspace/libvulkan_wrapper.so.unstripped
+              /usr/bin/llvm-strip --strip-unneeded -o /workspace/libvulkan_wrapper.so /workspace/libvulkan_wrapper.so.unstripped
+              echo "BUILD SUCCESS"
+            ' 2>&1 | tail -40
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libvulkan_wrapper-llvm
+          path: |
+            tp/mesa_bionic/libvulkan_wrapper.so
+            tp/mesa_bionic/libvulkan_wrapper.so.unstripped
+          if-no-files-found: error
