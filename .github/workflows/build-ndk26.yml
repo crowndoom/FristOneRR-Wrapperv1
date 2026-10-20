@@ -71,7 +71,7 @@ jobs:
           pkg_config_libdir = termux_dir + '/lib/pkgconfig:' + termux_dir + '/share/pkgconfig'
 
           [built-in options]
-          c_args = ['-D__TERMUX__', '-D__USE_GNU', '-U__ANDROID__', '-I' + termux_dir + '/include', '-include', 'fcntl.h', '-include', 'unistd.h']
+          c_args = ['-D__TERMUX__', '-D__USE_GNU', '-U__ANDROID__', '-UHAVE_MEMFD_CREATE', '-I' + termux_dir + '/include', '-include', 'fcntl.h', '-include', 'unistd.h']
           cpp_args = ['-D__TERMUX__', '-D__USE_GNU', '-U__ANDROID__', '-I' + termux_dir + '/include', '-include', 'fcntl.h', '-include', 'unistd.h']
           c_link_args = ['-L' + termux_dir + '/lib', '-L' + ndk_lib_dir, '-landroid', '-llog', '-Wl,--allow-shlib-undefined']
           cpp_link_args = ['-L' + termux_dir + '/lib', '-L' + ndk_lib_dir, '-landroid', '-llog', '-Wl,--allow-shlib-undefined', '-static-libstdc++']
