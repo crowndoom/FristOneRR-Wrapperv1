@@ -50,20 +50,43 @@ jobs:
       - name: Build wrapper in container
         run: |
           set -e
-          # Use wrapper-compiler image which has build.sh
           CONTAINER_ID=$(docker create \
             -v "$(pwd)/build-src:/workspace" \
             ghcr.io/leegao/mesa-wrapper-ci/wrapper-compiler:latest \
-            build)
+            bash -c '
+              set -e
+              cd /workspace
+              # Run meson setup with b_lundef=false
+              meson setup build --cross-file /root/build-config/cross_file.txt \
+                  -Dcpp_rtti=false -Dgbm=disabled -Dopengl=false -Dllvm=disabled \
+                  -Dshared-llvm=disabled -Dplatforms=x11 -Dgallium-drivers= \
+                  -Dxmlconfig=disabled -Dvulkan-drivers=wrapper -Db_lundef=false
+              ninja -C build src/vulkan/wrapper/libvulkan_wrapper.so
+              cp build/src/vulkan/wrapper/libvulkan_wrapper.so /workspace/libvulkan_wrapper.so.unstripped
+              STRIP=$(find /home/builder/lib -maxdepth 3 -name "llvm-strip" -type f | head -n1)
+              $STRIP --strip-unneeded -o /workspace/libvulkan_wrapper.so /workspace/libvulkan_wrapper.so.unstripped
+              echo "BUILD SUCCESS"
+              ls -la /workspace/libvulkan_wrapper.so*
+            ')
           echo "Container ID: $CONTAINER_ID"
           docker start -a "$CONTAINER_ID" 2>&1 | tail -30
           BUILD_EXIT=$?
           echo "Build exit code: $BUILD_EXIT"
-          # Copy the .so out
-          docker cp "$CONTAINER_ID:/workspace/build/libvulkan_wrapper.so" ./libvulkan_wrapper.so 2>&1 || echo "cp .so failed"
-          docker cp "$CONTAINER_ID:/workspace/build/libvulkan_wrapper.so.unstripped" ./libvulkan_wrapper.so.unstripped 2>&1 || echo "cp unstripped failed"
           docker rm "$CONTAINER_ID" 2>/dev/null || true
-          ls -la libvulkan_wrapper.so* 2>/dev/null || echo "No .so found"
+          ls -la build-src/libvulkan_wrapper.so*
+
+      - name: Verify and collect .so
+        run: |
+          echo "=== Checking for built .so ==="
+          if [ -f build-src/libvulkan_wrapper.so ]; then
+            cp build-src/libvulkan_wrapper.so ./libvulkan_wrapper.so
+            cp build-src/libvulkan_wrapper.so.unstripped ./libvulkan_wrapper.so.unstripped 2>/dev/null || true
+            echo "Collected successfully"
+          else
+            echo "ERROR: .so not found"
+            find . -name "libvulkan_wrapper.so*" 2>/dev/null
+            exit 1
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
