@@ -47,14 +47,12 @@ jobs:
           cp -r /tmp/SPIRV-Tools/include build-src/src/vulkan/wrapper/include/spirv-tools
           ls -la build-src/src/vulkan/wrapper/lib
 
-      - name: Build wrapper in container
+      - name: Build wrapper in container (detached)
         run: |
           set -e
-          mkdir -p build-output
-          # Run build and capture output to file on runner
-          sudo docker run --rm \
+          # Start container in detached mode
+          CONTAINER_ID=$(docker create \
             -v "$(pwd)/build-src:/workspace" \
-            -v "$(pwd)/build-output:/output" \
             ghcr.io/termux/package-builder:latest \
             bash -c '
               set -e
@@ -96,38 +94,28 @@ jobs:
 
               pip3 install --quiet meson ninja 2>/dev/null || pip3 install meson ninja
 
-              echo "=== Running meson setup ==="
               meson setup build --cross-file /tmp/cross.txt \
                 -Dcpp_rtti=false -Dgbm=disabled -Dopengl=false -Dllvm=disabled \
                 -Dshared-llvm=disabled -Dplatforms=x11 -Dgallium-drivers= \
                 -Dxmlconfig=disabled -Dvulkan-drivers=wrapper -Db_lundef=false \
                 -Dbuildtype=release
 
-              echo "=== Running ninja ==="
               ninja -C build src/vulkan/wrapper/libvulkan_wrapper.so
 
-              echo "=== Copying output ==="
-              cp build/src/vulkan/wrapper/libvulkan_wrapper.so /output/libvulkan_wrapper.so.unstripped
-              /usr/bin/llvm-strip --strip-unneeded -o /output/libvulkan_wrapper.so /output/libvulkan_wrapper.so.unstripped
+              cp build/src/vulkan/wrapper/libvulkan_wrapper.so /tmp/libvulkan_wrapper.so.unstripped
+              /usr/bin/llvm-strip --strip-unneeded -o /tmp/libvulkan_wrapper.so /tmp/libvulkan_wrapper.so.unstripped
               echo "BUILD SUCCESS"
-              ls -la /output/
-            ' 2>&1
-          echo "=== Runner output dir ==="
-          ls -la build-output/
-
-      - name: Verify and collect .so
-        run: |
-          echo "=== Checking output dir ==="
-          ls -la build-output/ 2>/dev/null || echo "No build-output dir"
-          if [ -f build-output/libvulkan_wrapper.so ]; then
-            cp build-output/libvulkan_wrapper.so ./libvulkan_wrapper.so
-            cp build-output/libvulkan_wrapper.so.unstripped ./libvulkan_wrapper.so.unstripped 2>/dev/null || true
-            echo "Collected successfully"
-          else
-            echo "ERROR: .so not found"
-            find . -name "libvulkan_wrapper.so*" 2>/dev/null
-            exit 1
-          fi
+            ')
+          echo "Container ID: $CONTAINER_ID"
+          # Run the container
+          docker start -a "$CONTAINER_ID"
+          BUILD_EXIT=$?
+          echo "Build exit code: $BUILD_EXIT"
+          # Copy the .so out using docker cp
+          docker cp "$CONTAINER_ID:/tmp/libvulkan_wrapper.so" ./libvulkan_wrapper.so 2>&1 || echo "cp .so failed"
+          docker cp "$CONTAINER_ID:/tmp/libvulkan_wrapper.so.unstripped" ./libvulkan_wrapper.so.unstripped 2>&1 || echo "cp unstripped failed"
+          docker rm "$CONTAINER_ID" 2>/dev/null || true
+          ls -la libvulkan_wrapper.so*
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
