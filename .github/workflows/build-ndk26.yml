@@ -17,7 +17,7 @@ jobs:
       - name: Install system deps
         run: |
           sudo apt-get update
-          sudo apt-get install -y libdrm-dev pkg-config
+          sudo apt-get install -y libdrm-dev pkg-config glslang-tools libxcb1-dev libx11-dev libxshmfence-dev libxrandr-dev libxrender-dev libxext-dev
 
       - name: Build leegao SPIRV-Tools (aarch64 static libs)
         run: |
