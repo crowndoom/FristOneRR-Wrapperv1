@@ -50,26 +50,48 @@ jobs:
       - name: Build wrapper in container
         run: |
           set -e
-          # Run container in detached mode
-          CONTAINER_ID=$(docker create \
+          mkdir -p build-output
+          sudo docker run --rm \
             -v "$(pwd)/build-src:/workspace" \
+            -v "$(pwd)/build-output:/output" \
             ghcr.io/termux/package-builder:latest \
-            /root/build.sh)
-          echo "Container ID: $CONTAINER_ID"
-          # Run the build
-          docker start -a "$CONTAINER_ID" 2>&1 | tail -30
-          BUILD_EXIT=$?
-          echo "Build exit code: $BUILD_EXIT"
-          # Copy the .so out
-          docker cp "$CONTAINER_ID:/workspace/build/libvulkan_wrapper.so" ./libvulkan_wrapper.so 2>&1 || echo "cp .so failed"
-          docker cp "$CONTAINER_ID:/workspace/build/libvulkan_wrapper.so.unstripped" ./libvulkan_wrapper.so.unstripped 2>&1 || echo "cp unstripped failed"
-          docker rm "$CONTAINER_ID" 2>/dev/null || true
-          ls -la libvulkan_wrapper.so*
+            bash -c '
+              set -e
+              cd /workspace
+              # Run meson setup like build.sh
+              meson setup build --cross-file /root/build-config/cross_file.txt \
+                  -Dcpp_rtti=false -Dgbm=disabled -Dopengl=false -Dllvm=disabled \
+                  -Dshared-llvm=disabled -Dplatforms=x11 -Dgallium-drivers= \
+                  -Dxmlconfig=disabled -Dvulkan-drivers=wrapper
+              ninja -C build src/vulkan/wrapper/libvulkan_wrapper.so
+              cp build/src/vulkan/wrapper/libvulkan_wrapper.so /output/libvulkan_wrapper.so.unstripped
+              NDK_DIR=$(find /home/builder/lib -maxdepth 2 -name "android-ndk*" | head -n 1)
+              STRIP="${NDK_DIR}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
+              $STRIP --strip-unneeded -o /output/libvulkan_wrapper.so /output/libvulkan_wrapper.so.unstripped
+              echo "BUILD SUCCESS"
+              ls -la /output/
+            ' 2>&1 | tee /tmp/build.log
+          echo "=== Build output ==="
+          cat /tmp/build.log | tail -20
+
+      - name: Verify and collect .so
+        run: |
+          echo "=== Checking output dir ==="
+          ls -la build-output/
+          if [ -f build-output/libvulkan_wrapper.so ]; then
+            cp build-output/libvulkan_wrapper.so ./libvulkan_wrapper.so
+            cp build-output/libvulkan_wrapper.so.unstripped ./libvulkan_wrapper.so.unstripped 2>/dev/null || true
+            echo "Collected successfully"
+          else
+            echo "ERROR: .so not found"
+            find . -name "libvulkan_wrapper.so*" 2>/dev/null
+            exit 1
+          fi
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: libvulkan_wrapper-container
+          name: libvulkan_wrapper-container2
           path: |
             libvulkan_wrapper.so
             libvulkan_wrapper.so.unstripped
