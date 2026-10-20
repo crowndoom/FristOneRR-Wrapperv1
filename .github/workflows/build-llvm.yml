@@ -51,7 +51,6 @@ jobs:
         run: |
           set -e
           mkdir -p build-output
-          # Run build and capture output to file
           sudo docker run --rm \
             -v "$(pwd)/build-src:/workspace" \
             -v "$(pwd)/build-output:/output" \
@@ -63,7 +62,6 @@ jobs:
               CLANGPP=/usr/lib/llvm-21/bin/clang++
               TERMUX_DIR=/data/data/com.termux/files/usr
 
-              # Create cross file
               cat > /tmp/cross.txt <<EOF
               [binaries]
               c = "'$CLANG'"
@@ -95,7 +93,6 @@ jobs:
               sed -i "s/#if defined(HAVE_MEMFD_CREATE) \&\& !defined __TERMUX__/#if defined(HAVE_MEMFD_CREATE)/" src/util/anon_file.c 2>/dev/null || true
               sed -i "s/dep_libudev = dependency(.libudev., required : false)/dep_libudev = null_dep/g" meson.build 2>/dev/null || true
 
-              # Install meson
               pip3 install --quiet meson ninja 2>/dev/null || pip3 install meson ninja
 
               meson setup build --cross-file /tmp/cross.txt \
@@ -110,9 +107,12 @@ jobs:
               /usr/bin/llvm-strip --strip-unneeded -o /output/libvulkan_wrapper.so /output/libvulkan_wrapper.so.unstripped
               echo "BUILD SUCCESS"
               ls -la /output/
-            ' 2>&1 | tee /tmp/build.log | tail -20
-          echo "=== Full build log ==="
-          cat /tmp/build.log | grep -i "error\|BUILD SUCCESS\|ninja:" | head -20 || true
+            ' 2>&1 | tee /tmp/build-output.log
+          echo "=== Exit code: $? ==="
+          echo "=== Build log tail ==="
+          tail -20 /tmp/build-output.log
+          echo "=== Output dir ==="
+          ls -la build-output/
 
       - name: Verify and collect .so
         run: |
