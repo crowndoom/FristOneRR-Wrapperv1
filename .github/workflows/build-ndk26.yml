@@ -78,6 +78,13 @@ jobs:
           EOF
           echo "Cross file created"
 
+      - name: Install build deps
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install mako PyYAML meson ninja packaging
+          echo "Meson location: $(which meson || python -c 'import mesonbuild; print(mesonbuild.__file__)')"
+          python -m meson --version
+
       - name: Patch source
         run: |
           cd frist-src
@@ -89,12 +96,12 @@ jobs:
           set -e
           cd frist-src
           NDK=/usr/local/lib/android/sdk/ndk/$(ls /usr/local/lib/android/sdk/ndk | grep '^27' | head -1)
-          meson setup build --cross-file /tmp/cross.txt \
+          python -m meson setup build --cross-file /tmp/cross.txt \
             -Dcpp_rtti=false -Dgbm=disabled -Dopengl=false -Dllvm=disabled \
             -Dshared-llvm=disabled -Dplatforms=x11 -Dgallium-drivers= \
             -Dxmlconfig=disabled -Dvulkan-drivers=wrapper -Db_lundef=false \
             -Dbuildtype=release -Dplatform-sdk-version=26
-          ninja -C build src/vulkan/wrapper/libvulkan_wrapper.so
+          python -m ninja -C build src/vulkan/wrapper/libvulkan_wrapper.so 2>/dev/null || ninja -C build src/vulkan/wrapper/libvulkan_wrapper.so
 
       - name: Strip
         run: |
