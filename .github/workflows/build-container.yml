@@ -53,7 +53,7 @@ jobs:
           # Run container and capture output
           docker run --rm \
             -v "$(pwd)/build-src:/workspace" \
-            ghcr.io/termux/package-builder:latest \
+            ghcr.io/leegao/mesa-wrapper-ci/wrapper-compiler:latest \
             bash -c '
               set -e
               cd /workspace
