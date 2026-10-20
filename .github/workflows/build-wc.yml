@@ -1,0 +1,75 @@
+name: Build wrapper (wrapper-compiler image, aarch64 Android)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ fristonerr-wrapper-v1 ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Frist wrapper source (with BCn patch)
+        uses: actions/checkout@v4
+        with:
+          path: frist-src
+
+      - name: Build leegao SPIRV-Tools (aarch64 static libs)
+        run: |
+          set -e
+          git clone --depth 1 --recurse-submodules --shallow-submodules \
+            https://github.com/leegao/SPIRV-Tools.git /tmp/SPIRV-Tools
+          cd /tmp/SPIRV-Tools
+          sed -i 's/ -Werror//g' Android.mk
+          mkdir -p build/libs build/app jni
+          printf 'LOCAL_PATH := $(call my-dir)\ninclude $(LOCAL_PATH)/../Android.mk\n' > jni/Android.mk
+          NDK=/usr/local/lib/android/sdk/ndk/$(ls /usr/local/lib/android/sdk/ndk | grep '^27' | head -1)
+          "$NDK/ndk-build" -j"$(nproc)" -C /tmp/SPIRV-Tools \
+            NDK_PROJECT_PATH=/tmp/SPIRV-Tools \
+            NDK_LIBS_OUT=/tmp/SPIRV-Tools/build/libs \
+            NDK_APP_OUT=/tmp/SPIRV-Tools/build/app \
+            APP_ABI=arm64-v8a APP_PLATFORM=android-26
+          find /tmp/SPIRV-Tools/build -name '*.a'
+
+      - name: Prepare source with SPIRV-Tools
+        run: |
+          set -e
+          rm -rf build-src
+          cp -r frist-src build-src
+          mkdir -p build-src/src/vulkan/wrapper/lib
+          rm -f build-src/src/vulkan/wrapper/lib/*.a
+          if ls /tmp/SPIRV-Tools/build/app/local/arm64-v8a/*.a >/dev/null 2>&1; then
+            cp /tmp/SPIRV-Tools/build/app/local/arm64-v8a/*.a build-src/src/vulkan/wrapper/lib/
+          else
+            cp /tmp/SPIRV-Tools/build/libs/arm64-v8a/*.a build-src/src/vulkan/wrapper/lib/
+          fi
+          rm -rf build-src/src/vulkan/wrapper/include/spirv-tools
+          cp -r /tmp/SPIRV-Tools/include build-src/src/vulkan/wrapper/include/spirv-tools
+          ls -la build-src/src/vulkan/wrapper/lib
+
+      - name: Build wrapper in container
+        run: |
+          set -e
+          # Use wrapper-compiler image which has build.sh
+          CONTAINER_ID=$(docker create \
+            -v "$(pwd)/build-src:/workspace" \
+            ghcr.io/leegao/mesa-wrapper-ci/wrapper-compiler:latest \
+            build)
+          echo "Container ID: $CONTAINER_ID"
+          docker start -a "$CONTAINER_ID" 2>&1 | tail -30
+          BUILD_EXIT=$?
+          echo "Build exit code: $BUILD_EXIT"
+          # Copy the .so out
+          docker cp "$CONTAINER_ID:/workspace/build/libvulkan_wrapper.so" ./libvulkan_wrapper.so 2>&1 || echo "cp .so failed"
+          docker cp "$CONTAINER_ID:/workspace/build/libvulkan_wrapper.so.unstripped" ./libvulkan_wrapper.so.unstripped 2>&1 || echo "cp unstripped failed"
+          docker rm "$CONTAINER_ID" 2>/dev/null || true
+          ls -la libvulkan_wrapper.so* 2>/dev/null || echo "No .so found"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libvulkan_wrapper-wc
+          path: |
+            libvulkan_wrapper.so
+            libvulkan_wrapper.so.unstripped
+          if-no-files-found: error
