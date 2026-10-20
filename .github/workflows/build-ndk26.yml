@@ -105,7 +105,7 @@ jobs:
           NDK=/usr/local/lib/android/sdk/ndk/$(ls /usr/local/lib/android/sdk/ndk | grep '^27' | head -1)
           meson setup build --cross-file /tmp/cross.txt \
             -Dcpp_rtti=false -Dgbm=disabled -Dopengl=false -Dllvm=disabled \
-            -Dshared-llvm=disabled -Dplatforms=x11 -Dgallium-drivers= \
+            -Dshared-llvm=disabled -Dplatforms=android -Dgallium-drivers= \
             -Dxmlconfig=disabled -Dvulkan-drivers=wrapper -Db_lundef=false \
             -Dbuildtype=release -Dplatform-sdk-version=26
           ninja -C build src/vulkan/wrapper/libvulkan_wrapper.so
