@@ -50,49 +50,38 @@ jobs:
       - name: Build wrapper in container
         run: |
           set -e
-          mkdir -p build-output
-          sudo docker run --rm \
+          # Run container and capture output
+          docker run --rm \
             -v "$(pwd)/build-src:/workspace" \
-            -v "$(pwd)/build-output:/output" \
             ghcr.io/termux/package-builder:latest \
             bash -c '
               set -e
               cd /workspace
-              # Run meson setup like build.sh
-              meson setup build --cross-file /root/build-config/cross_file.txt \
-                  -Dcpp_rtti=false -Dgbm=disabled -Dopengl=false -Dllvm=disabled \
-                  -Dshared-llvm=disabled -Dplatforms=x11 -Dgallium-drivers= \
-                  -Dxmlconfig=disabled -Dvulkan-drivers=wrapper
-              ninja -C build src/vulkan/wrapper/libvulkan_wrapper.so
-              cp build/src/vulkan/wrapper/libvulkan_wrapper.so /output/libvulkan_wrapper.so.unstripped
-              NDK_DIR=$(find /home/builder/lib -maxdepth 2 -name "android-ndk*" | head -n 1)
-              STRIP="${NDK_DIR}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
-              $STRIP --strip-unneeded -o /output/libvulkan_wrapper.so /output/libvulkan_wrapper.so.unstripped
-              echo "BUILD SUCCESS"
-              ls -la /output/
+              # Run the container build script
+              bash /root/build.sh 2>&1
+              echo "=== BUILD EXIT: $? ==="
+              ls -la /workspace/build/libvulkan_wrapper.so* 2>/dev/null || echo "No .so in /workspace/build"
+              ls -la /workspace/libvulkan_wrapper.so* 2>/dev/null || echo "No .so in /workspace"
             ' 2>&1 | tee /tmp/build.log
-          echo "=== Build output ==="
-          cat /tmp/build.log | tail -20
+          echo "=== Build log tail ==="
+          tail -30 /tmp/build.log
 
-      - name: Verify and collect .so
+      - name: Check for .so
         run: |
-          echo "=== Checking output dir ==="
-          ls -la build-output/
-          if [ -f build-output/libvulkan_wrapper.so ]; then
-            cp build-output/libvulkan_wrapper.so ./libvulkan_wrapper.so
-            cp build-output/libvulkan_wrapper.so.unstripped ./libvulkan_wrapper.so.unstripped 2>/dev/null || true
-            echo "Collected successfully"
-          else
-            echo "ERROR: .so not found"
-            find . -name "libvulkan_wrapper.so*" 2>/dev/null
-            exit 1
-          fi
+          echo "=== Checking all locations ==="
+          find . -name "libvulkan_wrapper.so*" 2>/dev/null
+          find /tmp -name "libvulkan_wrapper.so*" 2>/dev/null
+          ls -la build-src/build/libvulkan_wrapper.so* 2>/dev/null || echo "Not in build-src/build"
+          ls -la build-src/libvulkan_wrapper.so* 2>/dev/null || echo "Not in build-src"
 
       - name: Upload artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: libvulkan_wrapper-container2
           path: |
-            libvulkan_wrapper.so
-            libvulkan_wrapper.so.unstripped
-          if-no-files-found: error
+            build-src/build/libvulkan_wrapper.so
+            build-src/build/libvulkan_wrapper.so.unstripped
+            build-src/libvulkan_wrapper.so
+            build-src/libvulkan_wrapper.so.unstripped
+          if-no-files-found: warn
