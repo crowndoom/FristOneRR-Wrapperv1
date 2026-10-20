@@ -110,7 +110,7 @@ jobs:
             -Dbuildtype=release -Dplatform-sdk-version=26
           ninja -C build src/vulkan/wrapper/libvulkan_wrapper.so
 
-      - name: Strip
+      - name: Strip and patch OSABI
         run: |
           set -e
           cd frist-src
@@ -118,7 +118,17 @@ jobs:
           NDK_BIN="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
           cp build/src/vulkan/wrapper/libvulkan_wrapper.so ../libvulkan_wrapper.so.unstripped
           "$NDK_BIN/llvm-strip" --strip-unneeded -o ../libvulkan_wrapper.so ../libvulkan_wrapper.so.unstripped
-          ls -la ../libvulkan_wrapper.so
+          cd ..
+          # Patch OSABI to Linux (3) - Wine on Android expects this
+          sudo apt-get install -y patchelf
+          patchelf --set-osabi Linux libvulkan_wrapper.so 2>/dev/null || echo "patchelf osabi failed"
+          # Verify
+          python3 -c "
+          data = open('libvulkan_wrapper.so','rb').read()
+          print('EI_OSABI:', data[7])
+          print('Size:', len(data))
+          "
+          ls -la libvulkan_wrapper.so
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
