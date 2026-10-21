@@ -1,0 +1,101 @@
+name: Build wrapper (wrapper-compiler image, aarch64 Android)
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ fristonerr-wrapper-v1 ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Frist wrapper source (with BCn patch)
+        uses: actions/checkout@v4
+        with:
+          path: frist-src
+
+      - name: Build leegao SPIRV-Tools (aarch64 static libs)
+        run: |
+          set -e
+          git clone --depth 1 --recurse-submodules --shallow-submodules \
+            https://github.com/leegao/SPIRV-Tools.git /tmp/SPIRV-Tools
+          cd /tmp/SPIRV-Tools
+          sed -i 's/ -Werror//g' Android.mk
+          mkdir -p build/libs build/app jni
+          printf 'LOCAL_PATH := $(call my-dir)\ninclude $(LOCAL_PATH)/../Android.mk\n' > jni/Android.mk
+          NDK=/usr/local/lib/android/sdk/ndk/$(ls /usr/local/lib/android/sdk/ndk | grep '^27' | head -1)
+          "$NDK/ndk-build" -j"$(nproc)" -C /tmp/SPIRV-Tools \
+            NDK_PROJECT_PATH=/tmp/SPIRV-Tools \
+            NDK_LIBS_OUT=/tmp/SPIRV-Tools/build/libs \
+            NDK_APP_OUT=/tmp/SPIRV-Tools/build/app \
+            APP_ABI=arm64-v8a APP_PLATFORM=android-26
+          find /tmp/SPIRV-Tools/build -name '*.a'
+
+      - name: Prepare source with SPIRV-Tools
+        run: |
+          set -e
+          rm -rf build-src
+          cp -r frist-src build-src
+          mkdir -p build-src/src/vulkan/wrapper/lib
+          rm -f build-src/src/vulkan/wrapper/lib/*.a
+          if ls /tmp/SPIRV-Tools/build/app/local/arm64-v8a/*.a >/dev/null 2>&1; then
+            cp /tmp/SPIRV-Tools/build/app/local/arm64-v8a/*.a build-src/src/vulkan/wrapper/lib/
+          else
+            cp /tmp/SPIRV-Tools/build/libs/arm64-v8a/*.a build-src/src/vulkan/wrapper/lib/
+          fi
+          rm -rf build-src/src/vulkan/wrapper/include/spirv-tools
+          cp -r /tmp/SPIRV-Tools/include build-src/src/vulkan/wrapper/include/spirv-tools
+          ls -la build-src/src/vulkan/wrapper/lib
+
+      - name: Build wrapper in container
+        run: |
+          set -e
+          mkdir -p build-output
+          # Use wrapper-compiler image which has build.sh
+          docker run --rm \
+            -v "$(pwd)/build-src:/workspace" \
+            -v "$(pwd)/build-output:/output" \
+            ghcr.io/leegao/mesa-wrapper-ci/wrapper-compiler:latest \
+            bash -c '
+              set -e
+              cd /workspace
+              # Run meson setup like build.sh but with our source
+              meson setup build --cross-file /root/build-config/cross_file.txt \
+                  -Dcpp_rtti=false -Dgbm=disabled -Dopengl=false -Dllvm=disabled \
+                  -Dshared-llvm=disabled -Dplatforms=x11 -Dgallium-drivers= \
+                  -Dxmlconfig=disabled -Dvulkan-drivers=wrapper
+              ninja -C build src/vulkan/wrapper/libvulkan_wrapper.so
+              cp build/src/vulkan/wrapper/libvulkan_wrapper.so /output/libvulkan_wrapper.so.unstripped
+              NDK_DIR=$(find /home/builder/lib -maxdepth 2 -name "android-ndk*" | head -n 1)
+              STRIP="${NDK_DIR}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
+              $STRIP --strip-unneeded -o /output/libvulkan_wrapper.so /output/libvulkan_wrapper.so.unstripped
+              echo "BUILD SUCCESS"
+              ls -la /output/
+            ' 2>&1 | tee /tmp/build.log
+          echo "=== Build output tail ==="
+          tail -20 /tmp/build.log
+          echo "=== Output dir ==="
+          ls -la build-output/
+
+      - name: Verify and collect .so
+        run: |
+          echo "=== Checking output dir ==="
+          ls -la build-output/ 2>/dev/null || echo "No build-output dir"
+          if [ -f build-output/libvulkan_wrapper.so ]; then
+            cp build-output/libvulkan_wrapper.so ./libvulkan_wrapper.so
+            cp build-output/libvulkan_wrapper.so.unstripped ./libvulkan_wrapper.so.unstripped 2>/dev/null || true
+            echo "Collected successfully"
+          else
+            echo "ERROR: .so not found"
+            find . -name "libvulkan_wrapper.so*" 2>/dev/null
+            exit 1
+          fi
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libvulkan_wrapper-wrappercompiler
+          path: |
+            libvulkan_wrapper.so
+            libvulkan_wrapper.so.unstripped
+          if-no-files-found: error
