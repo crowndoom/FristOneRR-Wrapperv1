@@ -56,7 +56,7 @@ jobs:
               set -e
               CF=/root/build-config/cross_file.txt
               Q=$(printf "\x27")
-              sed -i "s#android30-clang#android24-clang#g" "$CF"
+              sed -i "s#android30-clang#android26-clang#g" "$CF"
               sed -i "s#-landroid-shmem${Q}]#-landroid-shmem${Q}, ${Q}-Wl,--pack-dyn-relocs=none${Q}]#g" "$CF"
               echo "===== cross_file ====="
               cat "$CF"
