@@ -622,9 +622,16 @@ WRAPPER_GetPhysicalDeviceFormatProperties(VkPhysicalDevice physicalDevice,
    VK_FROM_HANDLE(wrapper_physical_device, pdevice, physicalDevice);
    struct vk_features *supported_features = &pdevice->base_supported_features;
 
+   /* Only expose BCn when the wrapper is actually going to decode it.
+    * With emulation disabled (the default, mask 0x0000) report the formats
+    * exactly as the underlying driver does, so applications fall back to
+    * uncompressed formats instead of uploading data the GPU cannot sample. */
+   bool emulate_bc =
+      (is_bc123_image_format(format) && pdevice->needs_bc1_emulation) ||
+      (is_bc4567_image_format(format) && pdevice->needs_bc4_emulation);
+
    VkFormat targetFormat = format;
-   bool modified = false;
-   if (is_bc_image_format(format) && !supported_features->textureCompressionBC) {
+   if (is_bc_image_format(format) && !supported_features->textureCompressionBC && emulate_bc) {
       targetFormat = unwrap_vk_format_physical_device(pdevice, format);
       PCHECKV(GetPhysicalDeviceFormatProperties(physicalDevice, targetFormat, pFormatProperties));
       pFormatProperties->optimalTilingFeatures |= VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT | VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT | VK_FORMAT_FEATURE_TRANSFER_SRC_BIT;
