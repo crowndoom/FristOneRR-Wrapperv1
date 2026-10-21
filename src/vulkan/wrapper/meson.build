@@ -124,6 +124,7 @@ wrapper_files = files(
   'graphics_env_hooks.cpp',
   'artifacts.cpp',
   'bcdec.c',
+  'adrenotools_stub.c',
 )
 
 wrapper_deps = [
