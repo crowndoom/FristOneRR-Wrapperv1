@@ -22,6 +22,16 @@
 #define WRAPPER_DEFAULT_VULKAN_PATH "/system/lib/libvulkan.so"
 #endif
 
+void *adrenotools_open_libvulkan(int dlopenMode, int featureFlags,
+                                 const char *tmpLibDir, const char *hookLibDir,
+                                 const char *customDriverDir, const char *customDriverName,
+                                 const char *fileRedirectDir, void **userMappingHandle);
+bool adrenotools_import_user_mem(void *handle, void *hostPtr, uint64_t size);
+bool adrenotools_mem_gpu_allocate(void *handle, uint64_t *size);
+bool adrenotools_mem_cpu_map(void *handle, void *hostPtr, uint64_t size);
+bool adrenotools_validate_gpu_mapping(void *handle);
+void adrenotools_set_turbo(bool turbo);
+
 void *
 adrenotools_open_libvulkan(int dlopenMode,
                            int featureFlags,
