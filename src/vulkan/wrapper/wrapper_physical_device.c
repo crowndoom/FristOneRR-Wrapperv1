@@ -1,4 +1,5 @@
 #include <math.h>
+#include <stdlib.h>
 
 #include "wrapper_private.h"
 #include "wrapper_entrypoints.h"
@@ -268,6 +269,19 @@ VkResult enumerate_physical_device(struct vk_instance *_instance)
        * FORCE_BCN_EMULATION=1. */
       pdevice->needs_bc1_emulation = false;
       pdevice->needs_bc4_emulation = false;
+
+      /* Winlator Mali's "BCn Layer Configuration" exports this variable:
+       *   0 = none, 1 = partial (BC1/2/3 only), 2 = full, 3 = auto.
+       * Unset keeps our default (off). FORCE/NO_BCN_EMULATION below still win. */
+      const char *emulate_bcn = getenv("WRAPPER_EMULATE_BCN");
+      if (emulate_bcn != NULL) {
+         int mode = atoi(emulate_bcn);
+         bool bc1 = (mode == 1 || mode == 2 || mode == 3);
+         bool bc4 = (mode == 2 || mode == 3);
+         pdevice->needs_bc1_emulation = bc1;
+         pdevice->needs_bc4_emulation = bc4;
+         WLOG("WRAPPER_EMULATE_BCN=%s -> bc1=%d bc4=%d", emulate_bcn, bc1, bc4);
+      }
 
       if (CHECK_FLAG("FORCE_BCN_EMULATION")) {
          if (pdevice->base_supported_features.textureCompressionBC) {

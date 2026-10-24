@@ -730,7 +730,23 @@ vk_common_GetAndroidHardwareBufferPropertiesANDROID(
 
    const native_handle_t *handle = AHardwareBuffer_getNativeHandle(buffer);
    assert(handle && handle->numFds > 0);
-   pProperties->allocationSize = lseek(handle->data[0], 0, SEEK_END);
+
+   /* Vendor gralloc handles (e.g. MediaTek) may expose several fds where the
+    * first one is a metadata fd that is not seekable (lseek -> -1/ESPIPE).
+    * Skip non-seekable fds and use the first one with a real size instead of
+    * blindly trusting data[0]. Restore the file offset afterwards so the
+    * buffer stays usable by the importer.
+    */
+   off_t ahb_size = -1;
+   for (int i = 0; i < handle->numFds; i++) {
+      off_t sz = lseek(handle->data[i], 0, SEEK_END);
+      if (sz > 0) {
+         ahb_size = sz;
+         lseek(handle->data[i], 0, SEEK_SET);
+         break;
+      }
+   }
+   pProperties->allocationSize = ahb_size > 0 ? (uint64_t)ahb_size : 0;
 
    VkPhysicalDeviceMemoryProperties mem_props;
 
